@@ -1,0 +1,94 @@
+openapi: 3.0.1
+info:
+  title: API de Agendamiento Médico
+  version: 1.0.0
+  description: API para registrar y consultar citas médicas para asegurados en Perú y Chile.
+
+paths:
+  /appointments:
+    post:
+      summary: Registrar un agendamiento
+      description: Guarda una solicitud de agendamiento en DynamoDB y la envía a procesamiento.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppointmentRequest"
+      responses:
+        '200':
+          description: Agendamiento en proceso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '400':
+          description: Error de validación
+        '500':
+          description: Error interno del servidor
+
+  /appointments/{insuredId}:
+    get:
+      summary: Obtener agendamientos por asegurado
+      description: Devuelve todas las citas médicas agendadas por un asegurado.
+      parameters:
+        - name: insuredId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{5}$'
+            example: "01234"
+      responses:
+        '200':
+          description: Lista de citas médicas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AppointmentRecord"
+        '400':
+          description: insuredId inválido
+        '500':
+          description: Error interno del servidor
+
+components:
+  schemas:
+    AppointmentRequest:
+      type: object
+      required:
+        - insuredId
+        - scheduleId
+        - countryISO
+      properties:
+        insuredId:
+          type: string
+          description: Código del asegurado (5 dígitos)
+          example: "00123"
+        scheduleId:
+          type: integer
+          description: ID del horario de cita
+          example: 100
+        countryISO:
+          type: string
+          enum: [PE, CL]
+          description: Código ISO del país
+
+    AppointmentRecord:
+      type: object
+      properties:
+        insuredId:
+          type: string
+        scheduleId:
+          type: integer
+        countryISO:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
