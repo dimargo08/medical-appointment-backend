@@ -1,0 +1,143 @@
+service: medical-appointment-backend
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: dev
+  environment:
+    DYNAMODB_TABLE: Appointments
+    SNS_TOPIC_NAME: AppointmentTopic
+    SNS_TOPIC_ARN:
+      Ref: AppointmentTopic
+    SQS_PE: SQS_PE
+    SQS_CL: SQS_CL
+    SQS_CONFIRMATIONS: SQS_Confirmations
+    
+
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:*
+            - sns:Publish
+            - sqs:*
+            - events:PutEvents
+          Resource: "*"
+
+functions:
+  appointment:
+    handler: src/handlers/appointment.handler
+    events:
+      - http:
+          path: appointments
+          method: post
+      - http:
+          path: appointments/{insuredId}
+          method: get
+      - sqs:
+          arn:
+            Fn::GetAtt: [SQSConfirmations, Arn]
+
+  appointment_pe:
+    handler: src/handlers/appointment_pe.handler
+    environment:
+      RDS_HOST: your-rds-host
+      RDS_USER: your-user
+      RDS_PASSWORD: your-password
+      RDS_DB: your-db-name
+
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [SQSPE, Arn]
+
+  appointment_cl:
+    handler: src/handlers/appointment_cl.handler
+    environment:
+      RDS_HOST: your-rds-host
+      RDS_USER: your-user
+      RDS_PASSWORD: your-password
+      RDS_DB: your-db-name
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [SQSCL, Arn]
+
+resources:
+  Resources:
+    ## DynamoDB Table
+    AppointmentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Appointments
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: insuredId
+            AttributeType: S
+          - AttributeName: scheduleId
+            AttributeType: N
+        KeySchema:
+          - AttributeName: insuredId
+            KeyType: HASH
+          - AttributeName: scheduleId
+            KeyType: RANGE
+
+    ## SNS Topic
+    AppointmentTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:provider.environment.SNS_TOPIC_NAME}
+        Subscription:
+          - Endpoint:
+              Fn::GetAtt: [SQSPE, Arn]
+            Protocol: sqs
+            FilterPolicy:
+              countryISO: ["PE"]
+          - Endpoint:
+              Fn::GetAtt: [SQSCL, Arn]
+            Protocol: sqs
+            FilterPolicy:
+              countryISO: ["CL"]
+
+    ## SQS for PE
+    SQSPE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.SQS_PE}
+
+    ## SQS for CL
+    SQSCL:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.SQS_CL}
+
+    ## SQS for EventBridge confirmations
+    SQSConfirmations:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.SQS_CONFIRMATIONS}
+
+    ## EventBridge Rule
+    AppointmentConfirmedRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventPattern:
+          source:
+            - "appointment.service"
+          detail-type:
+            - "appointment.confirmed"
+        Targets:
+          - Arn:
+              Fn::GetAtt: [SQSConfirmations, Arn]
+            Id: "SendToConfirmationSQS"
+
+plugins:
+  - serverless-offline
+  - serverless-webpack
+
+package:
+  individually: true
